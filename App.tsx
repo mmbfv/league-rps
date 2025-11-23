@@ -3,7 +3,7 @@ import { MoveType, GameResult, GameState } from './types';
 import { CHAMPIONS, WINNING_MOVES, SOUND_EFFECTS } from './constants';
 import ChampionCard from './components/ChampionCard';
 import GameArena from './components/GameArena';
-import { generateCommentary } from './services/geminiService';
+import { generateCommentary, generateSpeech } from './services/geminiService';
 import { Trophy, Skull, Minus, Sparkles, Volume2, VolumeX } from 'lucide-react';
 
 const App: React.FC = () => {
@@ -25,6 +25,15 @@ const App: React.FC = () => {
   });
 
   const commentaryRef = useRef<HTMLDivElement>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+
+  // Lazy initialize AudioContext
+  const getAudioContext = () => {
+    if (!audioContextRef.current) {
+      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+    }
+    return audioContextRef.current;
+  };
 
   const playSound = useCallback((soundUrl: string) => {
     if (isMuted) return;
@@ -73,13 +82,37 @@ const App: React.FC = () => {
 
       // Fetch AI Commentary
       setIsCommentaryLoading(true);
-      const text = await generateCommentary(move, randomMove, gameResult);
-      setCommentary(text);
-      setIsCommentaryLoading(false);
-      playSound(SOUND_EFFECTS.COMMENTARY);
+      
+      try {
+        const text = await generateCommentary(move, randomMove, gameResult);
+        setCommentary(text);
+        setIsCommentaryLoading(false);
+        
+        // Play commentary sound effect
+        playSound(SOUND_EFFECTS.COMMENTARY);
+
+        // Generate and Play Speech if not muted
+        if (!isMuted) {
+          const ctx = getAudioContext();
+          if (ctx.state === 'suspended') {
+            await ctx.resume();
+          }
+          
+          const audioBuffer = await generateSpeech(text, ctx);
+          if (audioBuffer) {
+            const source = ctx.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(ctx.destination);
+            source.start();
+          }
+        }
+      } catch (error) {
+        console.error("Commentary/Speech Error:", error);
+        setIsCommentaryLoading(false);
+      }
 
     }, 600);
-  }, [playSound]);
+  }, [playSound, isMuted]);
 
   const resetGame = () => {
     playSound(SOUND_EFFECTS.SELECT);
